@@ -1,10 +1,11 @@
+{ // bloc isolé : aucune variable ne fuit vers les autres cartes
 /*
  * Home Appliance Card (FR)
  * Carte Home Assistant pour l'électroménager (lave-linge, sèche-linge, réfrigérateur, congélateur, lave-vaisselle) :
  * illustration animée pendant le cycle, état, puissance, infos du dernier cycle, température et alerte « plus de
  * consommation ». Style verre, thème clair/sombre automatique, éditeur visuel, textes en français.
  */
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.2.0";
 
 const TYPES = {
   washer: { label: "Lave-linge", on: "En marche", off: "À l'arrêt", icon: "mdi:washing-machine" },
@@ -15,7 +16,38 @@ const TYPES = {
   fridge: { label: "Réfrigérateur 1 porte", on: "Compresseur en marche", off: "Au repos", icon: "mdi:fridge" },
   freezer: { label: "Congélateur 1 porte", on: "Compresseur en marche", off: "Au repos", icon: "mdi:fridge-industrial" },
 };
-const DEFAULTS = { title: "", theme: "auto", appliances: [] };
+/* === NUANCE COMMUNE v2 (cartes Johan854) ===
+ * Bloc identique dans toutes les cartes. Options : nuance, nuance_perso, intensite.
+ * nuance "theme" (par défaut) : suit la variable carte-nuance du thème Home Assistant ;
+ * si elle n'existe pas, la carte garde ses couleurs d'origine. Intensité : 0 = neutre, 1 = normal, 2 = très coloré. */
+const GV_NUANCES = [["braise", "Braise (rouge)", "#e0524f"], ["ocean", "Océan (bleu)", "#2f8fd8"], ["lagon", "Lagon (turquoise)", "#1fb5a8"], ["foret", "Forêt (vert)", "#3fae5a"], ["lavande", "Lavande (violet)", "#8a63d8"], ["framboise", "Framboise (rose)", "#e05597"], ["ambre", "Ambre (orange)", "#e8902c"], ["ardoise", "Ardoise (neutre)", "#7d8595"]];
+const GV_DEFAULTS = { nuance: "theme", intensite: 1 };
+const gvAccent = (c) => {
+  const p = c && c.nuance_perso;
+  if (c && c.nuance === "perso") {
+    if (Array.isArray(p) && p.length === 3) return "#" + p.map((v) => Math.max(0, Math.min(255, Math.round(+v || 0))).toString(16).padStart(2, "0")).join("");
+    if (typeof p === "string" && /^#?[0-9a-f]{6}$/i.test(p.trim())) return "#" + p.trim().replace("#", "");
+  }
+  const n = GV_NUANCES.find((x) => x[0] === (c && c.nuance));
+  return n ? n[2] : "var(--carte-nuance)";
+};
+/* Variables posées sur <ha-card> : --g-bg-x (fond dégradé teinté) et --acc-ui-x (couleur d'accent).
+ * Sans nuance (thème sans carte-nuance), elles sont invalides : chaque carte retombe alors sur ses couleurs d'origine. */
+const gvStyle = (c, dark) => {
+  const i = Number(c && c.intensite), ai = Number.isFinite(i) ? Math.max(0, Math.min(2, i)) : 1;
+  const m = (pct, base) => `color-mix(in srgb,var(--acc-ui) ${+(pct * ai).toFixed(1)}%,${base})`;
+  const bg = dark ? `linear-gradient(160deg,${m(5, "#1b1e32")} 0%,${m(11, "#1f1b2c")} 55%,${m(22, "#1c1620")} 100%)`
+    : `linear-gradient(160deg,${m(2, "#f8f9fd")} 0%,${m(5, "#eef1f8")} 55%,${m(11, "#f8f8fa")} 100%)`;
+  return `--acc-ui:${gvAccent(c)};--g-bg-x:${bg};--acc-ui-x:color-mix(in srgb,var(--acc-ui) ${dark ? "80%,#fff" : "82%,#000"})`;
+};
+const GV_FIELDS = [
+  { name: "nuance", selector: { select: { mode: "dropdown", options: [{ value: "theme", label: "Selon le thème (couleurs d'origine)" }, ...GV_NUANCES.map((n) => ({ value: n[0], label: n[1] })), { value: "perso", label: "Personnalisée" }] } } },
+  { name: "nuance_perso", selector: { color_rgb: {} } },
+  { name: "intensite", selector: { number: { min: 0, max: 2, step: 0.1, mode: "slider" } } }];
+const GV_LABELS = { nuance: "Nuance de couleur", nuance_perso: "Couleur personnalisée (nuance « Personnalisée »)", intensite: "Intensité de la nuance" };
+/* === FIN NUANCE COMMUNE === */
+
+const DEFAULTS = { title: "", theme: "auto", nuance: "theme", intensite: 1, appliances: [] };
 const APP_DEFAULTS = { type: "washer", name: "", state_entity: "", power_entity: "", temperature_entity: "", power_threshold: 5, no_power_after: 0, temp_alert: "", on_states: "", image: "", image_mode: "background", image_opacity: 0.35, info_entities: [] };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -181,10 +213,10 @@ class HomeApplianceCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `<style>
       * { box-sizing:border-box; }
-      ha-card.dark { --ap-text:#f4f6fb; --ap-muted:#a9afc0; --ap-bg:linear-gradient(160deg,#1b1e32 0%,#241a2a 55%,#2d1519 100%); --ap-border:rgba(255,255,255,.14); --ap-shadow:0 .6em 2em rgba(0,0,0,.35);
-        --ap-glass:rgba(255,255,255,.07); --ap-glass-b:rgba(255,255,255,.13); --ap-acc:#4fb3ff; --ap-ok:#3ddc84; --ap-err:#ff5a5f; --ap-art:#e8ebf5; --ap-art2:rgba(255,255,255,.2); }
-      ha-card.light { --ap-text:#1c2030; --ap-muted:#5d6477; --ap-bg:linear-gradient(160deg,#f8f9fd 0%,#eef1f8 55%,#f8eff0 100%); --ap-border:rgba(20,24,40,.12); --ap-shadow:0 .4em 1.4em rgba(20,24,40,.12);
-        --ap-glass:rgba(255,255,255,.7); --ap-glass-b:rgba(20,24,40,.1); --ap-acc:#1a76d2; --ap-ok:#1a9d55; --ap-err:#d32f35; --ap-art:#3d4660; --ap-art2:rgba(20,24,40,.14); }
+      ha-card.dark { --ap-text:#f4f6fb; --ap-muted:#a9afc0; --ap-bg:var(--g-bg-x,linear-gradient(160deg,#1b1e32 0%,#241a2a 55%,#2d1519 100%)); --ap-border:rgba(255,255,255,.14); --ap-shadow:0 .6em 2em rgba(0,0,0,.35);
+        --ap-glass:rgba(255,255,255,.07); --ap-glass-b:rgba(255,255,255,.13); --ap-acc:var(--acc-ui-x,#4fb3ff); --ap-ok:#3ddc84; --ap-err:#ff5a5f; --ap-art:#e8ebf5; --ap-art2:rgba(255,255,255,.2); }
+      ha-card.light { --ap-text:#1c2030; --ap-muted:#5d6477; --ap-bg:var(--g-bg-x,linear-gradient(160deg,#f8f9fd 0%,#eef1f8 55%,#f8eff0 100%)); --ap-border:rgba(20,24,40,.12); --ap-shadow:0 .4em 1.4em rgba(20,24,40,.12);
+        --ap-glass:rgba(255,255,255,.7); --ap-glass-b:rgba(20,24,40,.1); --ap-acc:var(--acc-ui-x,#1a76d2); --ap-ok:#1a9d55; --ap-err:#d32f35; --ap-art:#3d4660; --ap-art2:rgba(20,24,40,.14); }
       ha-card { container-type:inline-size; display:flex; flex-direction:column; gap:12px; padding:16px; color:var(--ap-text); border-radius:24px; border:1px solid var(--ap-border); background:var(--ap-bg); box-shadow:var(--ap-shadow); overflow:hidden; }
       ha-icon { --mdc-icon-size:1.15em; flex:none; }
       button { font:inherit; color:inherit; background:none; border:0; padding:0; text-align:left; cursor:pointer; -webkit-tap-highlight-color:transparent; }
@@ -220,17 +252,17 @@ class HomeApplianceCard extends HTMLElement {
       .infs { grid-column:1/-1; display:flex; flex-direction:column; border-top:1px solid var(--ap-glass-b); } .inf { display:flex; justify-content:space-between; gap:10px; padding:.5em 0; font-size:.84em; border-top:1px solid var(--ap-glass-b); width:100%; } .inf:first-child { border-top:0; } .inf span { color:var(--ap-muted); } .inf b { text-align:right; }
       @media (prefers-reduced-motion: reduce) { .run *, .phimg { animation:none !important; } }
     </style>
-    <ha-card class="${dark ? "dark" : "light"}">${c.title ? `<div class="t">${esc(c.title)}</div>` : ""}<div class="grid">${tiles || `<div class="sb">Ajoute un appareil dans l'éditeur.</div>`}</div></ha-card>`;
+    <ha-card class="${dark ? "dark" : "light"}" style="${gvStyle(this._config, dark)}">${c.title ? `<div class="t">${esc(c.title)}</div>` : ""}<div class="grid">${tiles || `<div class="sb">Ajoute un appareil dans l'éditeur.</div>`}</div></ha-card>`;
     this.shadowRoot.querySelectorAll("[data-more]").forEach((el) => el.addEventListener("click", () => this._more(el.dataset.more)));
   }
 }
 
 /* ---------- Éditeur visuel ---------- */
-const LABELS = { title: "Titre (facultatif)", theme: "Thème", type: "Type d'appareil", name: "Nom", state_entity: "Entité d'état (marche / arrêt)", power_entity: "Entité de puissance (W)",
+const LABELS = { ...GV_LABELS, title: "Titre (facultatif)", theme: "Thème", type: "Type d'appareil", name: "Nom", state_entity: "Entité d'état (marche / arrêt)", power_entity: "Entité de puissance (W)",
   temperature_entity: "Température (réfrigérateur, congélateur, four)", power_threshold: "Seuil de marche (W)", no_power_after: "Alerte si aucune consommation depuis (min, 0 = aucune)",
   temp_alert: "Alerte si température supérieure à (°C)", on_states: "États « en marche » (séparés par des virgules, facultatif)", entity: "Entité", label: "Libellé", image: "Photo de l'appareil (URL, ex. /local/lave-linge.png)", image_mode: "Affichage de la photo", image_opacity: "Opacité de la photo de fond (0 à 1)" };
 const MAIN = [{ type: "grid", name: "", schema: [{ name: "title", selector: { text: {} } },
-  { name: "theme", selector: { select: { mode: "dropdown", options: [{ value: "auto", label: "Automatique" }, { value: "light", label: "Clair" }, { value: "dark", label: "Sombre" }] } } }] }];
+  { name: "theme", selector: { select: { mode: "dropdown", options: [{ value: "auto", label: "Automatique" }, { value: "light", label: "Clair" }, { value: "dark", label: "Sombre" }] } } }, ...GV_FIELDS] }];
 const APP = [
   { type: "grid", name: "", schema: [
     { name: "type", selector: { select: { mode: "dropdown", options: Object.entries(TYPES).map(([value, t]) => ({ value, label: t.label })) } } },
@@ -307,3 +339,4 @@ customElements.define("home-appliance-card-editor", HomeApplianceCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "home-appliance-card", name: "Home Appliance Card (FR)", description: "Électroménager : lave-linge, sèche-linge, réfrigérateur, congélateur, lave-vaisselle (état, puissance, dernier cycle, alertes).", preview: true });
 console.info(`%c HOME-APPLIANCE-CARD %c v${CARD_VERSION} `, "color:#fff;background:#1a76d2;font-weight:700;border-radius:3px 0 0 3px;padding:2px 4px", "color:#1a76d2;background:#fff;font-weight:700;border-radius:0 3px 3px 0;padding:2px 4px");
+}
